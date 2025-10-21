@@ -1,0 +1,48 @@
+# Node modules
+node_modules/
+
+# Build output
+build/
+dist/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment/config
+.env
+config.yml
+*.local.yml
+
+# Test/coverage
+coverage/
+*.lcov
+
+# MCP/VSCode
+.vscode/
+mcp-test-report.json
+mcp-enhanced-test-report.json
+
+# Backups and temp
+*.backup.*
+*.bak
+*.tmp
+
+# Jest cache
+.jest/
+
+# IDEs
+.idea/
+*.swp
+
+# PR/test artifacts
+test-results.json
+
+# Ignore secrets
+*.secret

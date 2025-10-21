@@ -1,0 +1,52 @@
+# GitHub MCP Server Configuration
+# This is an example configuration file. Copy it to config.yml and customize as needed.
+
+github:
+  auth:
+    # Authentication type: "token" or "app"
+    type: "token"
+    
+    # For token authentication:
+    token: "${GITHUB_TOKEN}"  # Set this in your environment or replace with actual token
+    
+    # For GitHub App authentication:
+    # appId: "your-app-id"
+    # privateKey: |
+    #   -----BEGIN PRIVATE KEY-----
+    #   Your GitHub App private key content here
+    #   -----END PRIVATE KEY-----
+    # installationId: "your-installation-id"
+
+analysis:
+  # Default depth for code analysis: "basic", "detailed", or "comprehensive"
+  defaultDepth: "detailed"
+  
+  # Enable method tracking to detect renamed/moved methods
+  enableMethodTracking: true
+  
+  # Enable logic analysis to detect changes in program flow
+  enableLogicAnalysis: true
+
+refactoring:
+  # Preserve original logic during refactoring
+  preserveLogic: true
+  
+  # Create backups before making changes
+  createBackups: true
+  
+  # Default refactoring rules to apply
+  rules:
+    - "consistent-naming"
+    - "remove-unused-imports"
+    - "organize-imports"
+    - "format-code"
+
+pullRequests:
+  # Automatically generate comprehensive PR descriptions
+  autoDescription: true
+  
+  # Include detailed analysis in PR descriptions
+  includeAnalysis: true
+  
+  # Default base branch for pull requests
+  defaultBaseBranch: "main"
