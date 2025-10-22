@@ -85,7 +85,29 @@ node test-mcp-enhanced.js /Users/username/Documents/target-repository
 node test-pr-creation.js ~/projects/target-repository
 ```
 
-If no path is provided, the scripts will throw an error. The repository must contain a `page_classes` directory with JavaScript files.
+If no path is provided, the scripts will throw an error. The repository can be any Git repository with code files - it doesn't need specific directory structures.
+
+## File Processing
+
+The scripts now process **all files** in the target repository:
+
+- **Automatic .gitignore support**: Files matching patterns in `.gitignore` are automatically excluded
+- **Common ignore patterns**: Always excludes `.git/`, `node_modules/`, `.DS_Store`, etc.
+- **Text file filtering**: Only processes text files with common code extensions
+- **Size limits**: Skips files larger than 1MB to avoid memory issues
+- **Recursive scanning**: Processes files in all subdirectories
+
+### Supported File Types
+
+The scripts process files with these extensions:
+- **JavaScript/TypeScript**: `.js`, `.ts`, `.jsx`, `.tsx`
+- **Python**: `.py`
+- **Java**: `.java`
+- **C/C++**: `.c`, `.cpp`, `.h`, `.hpp`
+- **Web**: `.html`, `.css`, `.scss`, `.vue`, `.svelte`
+- **Config**: `.json`, `.xml`, `.yaml`, `.yml`
+- **Documentation**: `.md`, `.txt`
+- **And many more...**
 
 ## Repository Discovery
 
@@ -94,6 +116,15 @@ The scripts use explicit repository specification:
 1. **Command-line argument** (required)
 2. **Environment variable** - `TARGET_REPOSITORY_PATH`
 3. **No fallback behavior** - scripts will error if no valid path is provided
+
+## File Selection and Filtering
+
+The MCP server automatically:
+- Reads and respects `.gitignore` files in the target repository
+- Excludes common development artifacts (node_modules, .git, etc.)
+- Only processes text files with recognizable code extensions
+- Limits file size to prevent memory issues
+- Provides file type breakdown for transparency
 
 ## Git Configuration
 
@@ -122,11 +153,19 @@ Create a token at: https://github.com/settings/tokens
 
 ## Troubleshooting
 
-- **Repository not found**: Ensure the target repository path exists and contains a `page_classes` directory
+- **Repository not found**: Ensure the target repository path exists and is accessible
+- **No files processed**: Check that the repository contains text files with supported extensions
+- **Files ignored**: Verify your `.gitignore` isn't excluding files you want to process
 - **Authentication errors**: Verify your GitHub token has sufficient permissions
 - **Git configuration issues**: Run `git config --list` to verify your Git setup
 - **Branch detection fails**: Ensure you're in a Git repository with commits
 
 ## Advanced Usage
+
+The scripts now process any code repository, not just specific project structures. They automatically:
+- Respect existing `.gitignore` patterns
+- Filter for relevant file types
+- Provide detailed file type breakdowns
+- Limit processing to manageable file counts
 
 For more advanced usage patterns, check the individual test scripts and the MCP server source code in the `src/` directory.
