@@ -149,7 +149,6 @@ class PrCreationClient {
     for (const searchPath of searchPaths) {
       try {
         await fs.access(searchPath);
-        await fs.access(path.join(searchPath, 'page_classes'));
         
         // Verify it's the correct Git repository
         try {
@@ -168,7 +167,7 @@ class PrCreationClient {
         // Continue searching
       }
     }
-    throw new Error('Target repository not found. Please provide a valid repository path with a page_classes directory.');
+    throw new Error('Target repository not found. Please provide a valid repository path.');
   }
 
   async initialize() {
@@ -271,31 +270,158 @@ class PrCreationClient {
     return result;
   }
 
+  /**
+   * Parse .gitignore files and create ignore patterns
+   */
+  async parseGitignorePatterns(repoPath) {
+    const gitignorePatterns = [];
+    
+    try {
+      const gitignorePath = path.join(repoPath, '.gitignore');
+      const gitignoreContent = await fs.readFile(gitignorePath, 'utf-8');
+      
+      const lines = gitignoreContent.split('\n');
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed && !trimmed.startsWith('#')) {
+          // Convert gitignore patterns to regex-like patterns
+          let pattern = trimmed
+            .replace(/\./g, '\\.')  // Escape dots
+            .replace(/\*/g, '.*')   // Convert * to .*
+            .replace(/\?/g, '.')    // Convert ? to .
+            .replace(/\/$/, '');    // Remove trailing slash
+          
+          gitignorePatterns.push(new RegExp(pattern));
+        }
+      }
+      
+      console.log(`� Loaded ${gitignorePatterns.length} gitignore patterns`);
+    } catch (error) {
+      console.log('📋 No .gitignore file found or unable to read it');
+    }
+    
+    // Add common patterns to always ignore
+    gitignorePatterns.push(
+      /^\.git$/,
+      /^node_modules$/,
+      /^\.DS_Store$/,
+      /^Thumbs\.db$/,
+      /^\.vscode$/,
+      /^\.idea$/,
+      /\.log$/,
+      /\.tmp$/,
+      /\.temp$/
+    );
+    
+    return gitignorePatterns;
+  }
+
+  /**
+   * Check if a file should be ignored based on gitignore patterns
+   */
+  shouldIgnoreFile(filePath, repoPath, ignorePatterns) {
+    const relativePath = path.relative(repoPath, filePath);
+    const fileName = path.basename(filePath);
+    
+    for (const pattern of ignorePatterns) {
+      if (pattern.test(relativePath) || pattern.test(fileName)) {
+        return true;
+      }
+    }
+    
+    return false;
+  }
+
+  /**
+   * Recursively scan directory for all files, respecting gitignore
+   */
+  async scanDirectoryRecursively(dir, repoPath, ignorePatterns, results = []) {
+    try {
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+      
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        
+        // Skip if matches gitignore patterns
+        if (this.shouldIgnoreFile(fullPath, repoPath, ignorePatterns)) {
+          continue;
+        }
+        
+        if (entry.isDirectory()) {
+          // Recursively scan subdirectories
+          await this.scanDirectoryRecursively(fullPath, repoPath, ignorePatterns, results);
+        } else if (entry.isFile()) {
+          // Only include text files that might contain code
+          const ext = path.extname(entry.name).toLowerCase();
+          const textExtensions = [
+            '.js', '.ts', '.jsx', '.tsx', '.py', '.java', '.c', '.cpp', '.h', '.hpp',
+            '.cs', '.php', '.rb', '.go', '.rs', '.swift', '.kt', '.scala', '.sh',
+            '.html', '.css', '.scss', '.less', '.sass', '.vue', '.svelte',
+            '.json', '.xml', '.yaml', '.yml', '.md', '.txt', '.sql'
+          ];
+          
+          if (textExtensions.includes(ext) || !ext) {
+            const stats = await fs.stat(fullPath);
+            if (stats.size > 0 && stats.size < 1024 * 1024) { // Skip files larger than 1MB
+              results.push({
+                path: path.relative(repoPath, fullPath),
+                localPath: fullPath,
+                size: stats.size,
+                extension: ext
+              });
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.log(`⚠️  Could not scan directory ${dir}: ${error.message}`);
+    }
+    
+    return results;
+  }
+
   async scanPageClassesFiles() {
     if (!this.currentRepository) {
       throw new Error('Target repository not discovered. Call initialize() first.');
     }
     
-    console.log('🔍 Scanning page_classes for commit files using Git-discovered path...');
-    const dir = path.join(this.currentRepository, 'page_classes');
-    const out = [];
-    try {
-      const entries = await fs.readdir(dir);
-      for (const f of entries) {
-        if (f.endsWith('.js')) {
-          const full = path.join(dir, f);
-            const stats = await fs.stat(full);
-          if (stats.isFile() && stats.size > 0) {
-            console.log(`  📄 ${f} (${stats.size} bytes)`);
-            out.push({ path: `page_classes/${f}`, localPath: full });
-          }
-        }
-      }
-    } catch (e) {
-      console.error('❌ Failed to read page_classes from Git repository:', e.message);
+    console.log('🔍 Scanning all files in repository for commit (respecting .gitignore)...');
+    
+    // Parse gitignore patterns
+    const ignorePatterns = await this.parseGitignorePatterns(this.currentRepository);
+    
+    // Scan all files recursively
+    const allFiles = await this.scanDirectoryRecursively(
+      this.currentRepository, 
+      this.currentRepository, 
+      ignorePatterns
+    );
+    
+    // Limit files for PR creation to avoid overwhelming
+    const maxFiles = 10;
+    const filesToCommit = allFiles.slice(0, maxFiles);
+    
+    if (allFiles.length > maxFiles) {
+      console.log(`⚠️  Found ${allFiles.length} files, committing first ${maxFiles} for PR`);
     }
-    console.log(`✅ Collected ${out.length} files from Git repository`);
-    return out;
+    
+    console.log(`✅ Collected ${filesToCommit.length} files for commit`);
+    
+    // Show file type breakdown
+    const extensionCounts = {};
+    filesToCommit.forEach(file => {
+      const ext = file.extension || 'no extension';
+      extensionCounts[ext] = (extensionCounts[ext] || 0) + 1;
+    });
+    
+    console.log('📊 Files to commit by type:');
+    Object.entries(extensionCounts)
+      .sort(([,a], [,b]) => b - a)
+      .forEach(([ext, count]) => {
+        console.log(`   ${ext}: ${count} files`);
+      });
+    
+    return filesToCommit;
   }
 
   async run() {
@@ -311,11 +437,11 @@ class PrCreationClient {
     }
 
     // Create PR
-    console.log('\n📝 Creating analyzed PR with page_classes files...');
+    console.log('\n📝 Creating analyzed PR with repository files...');
     const prResult = await this.callTool('create_analyzed_pr', {
       repository: this.repoConfig.repository,
-      branchName: `mcp-page-classes-pr-${Date.now()}`,
-      title: 'MCP Analyzed PR: page_classes',
+      branchName: `mcp-repository-files-pr-${Date.now()}`,
+      title: 'MCP Analyzed PR: Repository Files',
       baseBranch: this.repoConfig.currentBranch || 'main',
       includeAnalysis: true,
       autoDescription: true,

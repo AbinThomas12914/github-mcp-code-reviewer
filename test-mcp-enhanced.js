@@ -215,10 +215,6 @@ class EnhancedMcpTestClient {
         // Verify directory exists
         await fs.access(searchPath);
         
-        // Verify it's a valid repository structure
-        const pageClassesDir = path.join(searchPath, 'page_classes');
-        await fs.access(pageClassesDir);
-        
         // Optional: Verify it's a Git repository
         try {
           const gitRemote = execSync('git remote get-url origin', { 
@@ -231,7 +227,7 @@ class EnhancedMcpTestClient {
           return searchPath;
         } catch (gitError) {
           // Not a Git repository, but has correct structure
-          console.log(`✅ Valid directory structure (not Git repository): ${searchPath}`);
+          console.log(`✅ Valid directory structure: ${searchPath}`);
           return searchPath;
         }
         
@@ -240,7 +236,7 @@ class EnhancedMcpTestClient {
       }
     }
 
-    throw new Error('Target repository not found. Please provide a valid repository path with a page_classes directory.');
+    throw new Error('Target repository not found. Please provide a valid repository path.');
   }
 
   async initialize() {
@@ -310,43 +306,153 @@ class EnhancedMcpTestClient {
   }
 
   /**
-   * Enhanced scanning using Git-discovered repository path
+   * Parse .gitignore files and create ignore patterns
    */
-  async scanPageClassesFiles() {
+  async parseGitignorePatterns(repoPath) {
+    const gitignorePatterns = [];
+    
+    try {
+      const gitignorePath = path.join(repoPath, '.gitignore');
+      const gitignoreContent = await fs.readFile(gitignorePath, 'utf-8');
+      
+      const lines = gitignoreContent.split('\n');
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed && !trimmed.startsWith('#')) {
+          // Convert gitignore patterns to regex-like patterns
+          let pattern = trimmed
+            .replace(/\./g, '\\.')  // Escape dots
+            .replace(/\*/g, '.*')   // Convert * to .*
+            .replace(/\?/g, '.')    // Convert ? to .
+            .replace(/\/$/, '');    // Remove trailing slash
+          
+          gitignorePatterns.push(new RegExp(pattern));
+        }
+      }
+      
+      console.log(`� Loaded ${gitignorePatterns.length} gitignore patterns`);
+    } catch (error) {
+      console.log('📋 No .gitignore file found or unable to read it');
+    }
+    
+    // Add common patterns to always ignore
+    gitignorePatterns.push(
+      /^\.git$/,
+      /^node_modules$/,
+      /^\.DS_Store$/,
+      /^Thumbs\.db$/,
+      /^\.vscode$/,
+      /^\.idea$/,
+      /\.log$/,
+      /\.tmp$/,
+      /\.temp$/
+    );
+    
+    return gitignorePatterns;
+  }
+
+  /**
+   * Check if a file should be ignored based on gitignore patterns
+   */
+  shouldIgnoreFile(filePath, repoPath, ignorePatterns) {
+    const relativePath = path.relative(repoPath, filePath);
+    const fileName = path.basename(filePath);
+    
+    for (const pattern of ignorePatterns) {
+      if (pattern.test(relativePath) || pattern.test(fileName)) {
+        return true;
+      }
+    }
+    
+    return false;
+  }
+
+  /**
+   * Recursively scan directory for all files, respecting gitignore
+   */
+  async scanDirectoryRecursively(dir, repoPath, ignorePatterns, results = []) {
+    try {
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+      
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        
+        // Skip if matches gitignore patterns
+        if (this.shouldIgnoreFile(fullPath, repoPath, ignorePatterns)) {
+          continue;
+        }
+        
+        if (entry.isDirectory()) {
+          // Recursively scan subdirectories
+          await this.scanDirectoryRecursively(fullPath, repoPath, ignorePatterns, results);
+        } else if (entry.isFile()) {
+          // Only include text files that might contain code
+          const ext = path.extname(entry.name).toLowerCase();
+          const textExtensions = [
+            '.js', '.ts', '.jsx', '.tsx', '.py', '.java', '.c', '.cpp', '.h', '.hpp',
+            '.cs', '.php', '.rb', '.go', '.rs', '.swift', '.kt', '.scala', '.sh',
+            '.html', '.css', '.scss', '.less', '.sass', '.vue', '.svelte',
+            '.json', '.xml', '.yaml', '.yml', '.md', '.txt', '.sql'
+          ];
+          
+          if (textExtensions.includes(ext) || !ext) {
+            const stats = await fs.stat(fullPath);
+            if (stats.size > 0 && stats.size < 1024 * 1024) { // Skip files larger than 1MB
+              results.push({
+                repoPath: path.relative(repoPath, fullPath),
+                localPath: fullPath,
+                size: stats.size,
+                extension: ext
+              });
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.log(`⚠️  Could not scan directory ${dir}: ${error.message}`);
+    }
+    
+    return results;
+  }
+
+  /**
+   * Enhanced scanning using Git-discovered repository path - now scans all files
+   */
+  async scanAllRepositoryFiles() {
     if (!this.automationExecutorPath) {
       throw new Error('Target repository not discovered. Call initialize() first.');
     }
     
-    console.log(`🔍 Scanning page_classes in Git-discovered repository...`);
-    const dir = path.join(this.automationExecutorPath, 'page_classes');
-    const results = [];
+    console.log(`🔍 Scanning all files in Git-discovered repository...`);
     
-    try {
-      const entries = await fs.readdir(dir);
-      
-      for (const file of entries) {
-        if (file.endsWith('.js')) {
-          const fullPath = path.join(dir, file);
-          const stats = await fs.stat(fullPath);
-          
-          if (stats.isFile() && stats.size > 0) {
-            console.log(`  📄 ${file} (${stats.size} bytes)`);
-            results.push({
-              repoPath: `page_classes/${file}`,
-              localPath: fullPath,
-              size: stats.size
-            });
-          }
-        }
-      }
-      
-      console.log(`✅ Found ${results.length} page class files in Git repository`);
-      return results;
-      
-    } catch (error) {
-      console.error('❌ Failed to scan page_classes in Git repository:', error.message);
-      throw error;
-    }
+    // Parse gitignore patterns
+    const ignorePatterns = await this.parseGitignorePatterns(this.automationExecutorPath);
+    
+    // Scan all files recursively
+    const results = await this.scanDirectoryRecursively(
+      this.automationExecutorPath, 
+      this.automationExecutorPath, 
+      ignorePatterns
+    );
+    
+    console.log(`✅ Found ${results.length} files in repository (excluding ignored files)`);
+    
+    // Show file type breakdown
+    const extensionCounts = {};
+    results.forEach(file => {
+      const ext = file.extension || 'no extension';
+      extensionCounts[ext] = (extensionCounts[ext] || 0) + 1;
+    });
+    
+    console.log('📊 File type breakdown:');
+    Object.entries(extensionCounts)
+      .sort(([,a], [,b]) => b - a)
+      .slice(0, 10)
+      .forEach(([ext, count]) => {
+        console.log(`   ${ext}: ${count} files`);
+      });
+    
+    return results;
   }
 
   async sendRequest(method, params) {
@@ -464,16 +570,26 @@ class EnhancedMcpTestClient {
       }
       
       console.log('🔑 Authentication configured successfully\n');
-      // Scan all page_classes files we will process
-      const pageClassFiles = await this.scanPageClassesFiles();
-      if (pageClassFiles.length === 0) {
-        console.log('⚠️  No page_classes JS files found. Stopping.');
+      
+      // Scan all repository files
+      const allFiles = await this.scanAllRepositoryFiles();
+      if (allFiles.length === 0) {
+        console.log('⚠️  No processable files found. Stopping.');
         return;
       }
-      console.log(`✅ Found ${pageClassFiles.length} page_classes files to process`);
+      
+      // Limit files for testing to avoid overwhelming the API
+      const maxFiles = 5;
+      const filesToProcess = allFiles.slice(0, maxFiles);
+      
+      if (allFiles.length > maxFiles) {
+        console.log(`⚠️  Found ${allFiles.length} files, processing first ${maxFiles} for testing`);
+      }
+      
+      console.log(`✅ Processing ${filesToProcess.length} files`);
 
-      // Iterate each page class file and run all three tools
-      for (const file of pageClassFiles) {
+      // Iterate each file and run all three tools
+      for (const file of filesToProcess) {
         console.log('\n' + '-'.repeat(60));
         console.log(`📄 Processing: ${file.repoPath}`);
 
@@ -540,57 +656,25 @@ class EnhancedMcpTestClient {
   }
 
   async setupTestFiles() {
-    console.log('📁 Verifying page_classes directory exists...');
+    console.log('📁 Verifying target repository exists...');
     try {
-      const dir = path.join(this.automationExecutorPath, 'page_classes');
-      await fs.access(dir);
-      console.log('✅ page_classes directory accessible');
+      await fs.access(this.automationExecutorPath);
+      console.log('✅ Target repository accessible');
     } catch (error) {
-      console.log('❌ page_classes directory not accessible:', error.message);
+      console.log('❌ Target repository not accessible:', error.message);
     }
   }
 
   async scanFilesForCommit() {
-    console.log('🔍 Legacy scanFilesForCommit called - returning page_classes only.');
-    const files = await this.scanPageClassesFiles();
+    console.log('🔍 Legacy scanFilesForCommit called - returning all repository files.');
+    const files = await this.scanAllRepositoryFiles();
     return files.map(f => ({ path: f.repoPath, localPath: f.localPath }));
   }
 
+  // Backward compatibility method
   async scanPageClassesFiles() {
-    if (!this.automationExecutorPath) {
-      throw new Error('Target repository not discovered. Call initialize() first.');
-    }
-    
-    console.log(`🔍 Scanning page_classes in Git-discovered repository...`);
-    const dir = path.join(this.automationExecutorPath, 'page_classes');
-    const results = [];
-    
-    try {
-      const entries = await fs.readdir(dir);
-      
-      for (const file of entries) {
-        if (file.endsWith('.js')) {
-          const fullPath = path.join(dir, file);
-          const stats = await fs.stat(fullPath);
-          
-          if (stats.isFile() && stats.size > 0) {
-            console.log(`  📄 ${file} (${stats.size} bytes)`);
-            results.push({
-              repoPath: `page_classes/${file}`,
-              localPath: fullPath,
-              size: stats.size
-            });
-          }
-        }
-      }
-      
-      console.log(`✅ Found ${results.length} page class files in Git repository`);
-      return results;
-      
-    } catch (error) {
-      console.error('❌ Failed to scan page_classes in Git repository:', error.message);
-      throw error;
-    }
+    console.log('� Legacy scanPageClassesFiles called - delegating to scanAllRepositoryFiles.');
+    return await this.scanAllRepositoryFiles();
   }
 
   async generateEnhancedTestReport() {
