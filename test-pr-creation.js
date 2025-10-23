@@ -238,7 +238,7 @@ class PrCreationClient {
   async sendRequest(method, params) {
     const request = { jsonrpc: '2.0', id: this.requestId++, method, params };
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('Timeout waiting for MCP response')), 30000);
+      const timeout = setTimeout(() => reject(new Error('Timeout waiting for MCP response')), 300000);
       let buffer = '';
       const handler = data => {
         buffer += data.toString();
@@ -357,7 +357,7 @@ class PrCreationClient {
             '.js', '.ts', '.jsx', '.tsx', '.py', '.java', '.c', '.cpp', '.h', '.hpp',
             '.cs', '.php', '.rb', '.go', '.rs', '.swift', '.kt', '.scala', '.sh',
             '.html', '.css', '.scss', '.less', '.sass', '.vue', '.svelte',
-            '.json', '.xml', '.yaml', '.yml', '.md', '.txt', '.sql'
+            '.json', '.xml', '.yaml', '.yml', '.md', '.txt', '.sql', '.feature'
           ];
           
           if (textExtensions.includes(ext) || !ext) {
@@ -398,18 +398,18 @@ class PrCreationClient {
     );
     
     // Limit files for PR creation to avoid overwhelming
-    const maxFiles = 10;
-    const filesToCommit = allFiles.slice(0, maxFiles);
+    // const maxFiles = 10;
+    // const filesToCommit = allFiles.slice(0, maxFiles);
     
-    if (allFiles.length > maxFiles) {
-      console.log(`⚠️  Found ${allFiles.length} files, committing first ${maxFiles} for PR`);
-    }
+    // if (allFiles.length > maxFiles) {
+    //   console.log(`⚠️  Found ${allFiles.length} files, committing first ${maxFiles} for PR`);
+    // }
     
-    console.log(`✅ Collected ${filesToCommit.length} files for commit`);
+    console.log(`✅ Collected ${allFiles.length} files for commit`);
     
     // Show file type breakdown
     const extensionCounts = {};
-    filesToCommit.forEach(file => {
+    allFiles.forEach(file => {
       const ext = file.extension || 'no extension';
       extensionCounts[ext] = (extensionCounts[ext] || 0) + 1;
     });
@@ -421,7 +421,7 @@ class PrCreationClient {
         console.log(`   ${ext}: ${count} files`);
       });
     
-    return filesToCommit;
+    return allFiles;
   }
 
   async run() {
