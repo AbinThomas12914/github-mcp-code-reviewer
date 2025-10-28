@@ -17,7 +17,6 @@ Thumbs.db
 
 # Environment/config
 .env
-config.yml
 *.local.yml
 
 # Test/coverage
